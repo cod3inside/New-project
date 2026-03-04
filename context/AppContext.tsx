@@ -21,6 +21,7 @@ interface AppState {
   articles: KnowledgeArticle[];
   posts: TeamPost[];
   webForms: WebForm[];
+  testimonials: any[]; // Added testimonials
   companySettings: CompanySettings;
   attendance: AttendanceRecord[];
   partnerDivision: PartnerDivisionData | null;
@@ -32,9 +33,9 @@ interface AppState {
   globalCurrency: string;
   setGlobalCurrency: (c: string) => void;
   formatAmount: (amount: number, currency?: string) => string;
-  login: (identifier?: string, password?: string) => Promise<{success: boolean, error?: string}>;
+  login: (identifier?: string, password?: string) => Promise<{success: boolean, error?: string}>; 
   logout: () => void;
-  register: (data: Partial<User>, role?: Role) => Promise<{success: boolean, error?: string}>;
+  register: (data: Partial<User>, role?: Role) => Promise<{success: boolean, error?: string}>; 
   resendVerification: (email: string) => Promise<boolean>;
   updateUserProfile: (data: Partial<User>) => void;
   addTeamMember: (data: {email: string, password: string, name: string, role: Role, position?: string, department?: string, salary?: number}) => Promise<{success: boolean, error?: string}>;
@@ -59,8 +60,7 @@ interface AppState {
   addInvoice: (i: Invoice) => void;
   updateInvoice: (i: Invoice) => void;
   sendInvoice: (id: string) => void;
-  addOpportunity: (o: Opportunity) => void;
-  updateOpportunityStage: (id: string, stage: Opportunity['stage']) => void;
+  deleteInvoice: (id: string) => void;
   addExpense: (e: Expense) => void;
   updateExpense: (e: Expense) => void;
   deleteExpense: (id: string) => void;
@@ -76,6 +76,10 @@ interface AppState {
   updateCompanySettings: (settings: CompanySettings) => void;
   savePartnerDivisionData: (data: PartnerDivisionData) => Promise<void>;
   markNotificationRead: (id: string) => void;
+  // Testimonial methods
+  addTestimonial: (t: any) => void;
+  updateTestimonial: (id: string, t: any) => void;
+  deleteTestimonial: (id: string) => void;
 }
 
 const AppContext = createContext<AppState | undefined>(undefined);
@@ -92,15 +96,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [articles, setArticles] = useState<KnowledgeArticle[]>([]);
   const [posts, setPosts] = useState<TeamPost[]>([]);
   const [webForms, setWebForms] = useState<WebForm[]>([]);
+  const [testimonials, setTestimonials] = useState<any[]>([]);
   const [attendance, setAttendance] = useState<AttendanceRecord[]>([]);
   const [partnerDivision, setPartnerDivision] = useState<PartnerDivisionData | null>(null);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
-  const [companySettings, setCompanySettings] = useState<CompanySettings>({
-    name: 'Clipping Friend',
-    address: 'M.A Jalil Tower, 3rd Floor\nMaluchi Bazar, Shibalaya, Manikganj',
-    email: 'info@clippingfriend.com',
-    phone: '+8801719845438',
-    website: 'www.clippingfriend.com'
+  const [companySettings, setCompanySettings] = useState<CompanySettings>({ 
+    name: 'Clipping Friend', 
+    address: 'M.A Jalil Tower, 3rd Floor\nMaluchi Bazar, Shibalaya, Manikganj', 
+    email: 'info@clippingfriend.com', 
+    phone: '+8801719845438', 
+    website: 'www.clippingfriend.com' 
   });
 
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
@@ -111,18 +116,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const init = async () => {
       try {
         const token = localStorage.getItem('token');
-        if (token) {
-          // Try to get user from localStorage first
-          const savedUser = localStorage.getItem('user');
-          if (savedUser) {
-            setUser(JSON.parse(savedUser));
-            await fetchAllData();
-          }
+        const storedUser = localStorage.getItem('user');
+        
+        if (token && storedUser) {
+          setUser(JSON.parse(storedUser));
+          await fetchAllData();
         }
       } catch (error) {
         console.error("Initialization error", error);
-        localStorage.removeItem('token');
-        localStorage.removeItem('user');
       } finally {
         setTimeout(() => setIsLoading(false), 500);
       }
@@ -130,31 +131,88 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     init();
   }, []);
 
-  // ✅ Fetch all data from real backend endpoints
   const fetchAllData = async () => {
     try {
-      const [invoicesRes, expensesRes, employeesRes, testimonialsRes] = await Promise.allSettled([
-        api.getInvoices(),
-        api.getExpenses(),
-        api.getEmployees(),
-        api.getTestimonials(),
+      // Fetch each resource separately as /api/data/all is gone
+      const [invoicesRes, expensesRes, employeesRes, testimonialsRes] = await Promise.all([
+        api.getInvoices().catch(() => []),
+        api.getExpenses().catch(() => []),
+        api.getEmployees().catch(() => []),
+        api.getTestimonials().catch(() => [])
       ]);
 
-      if (invoicesRes.status === 'fulfilled') setInvoices(invoicesRes.value || []);
-      if (expensesRes.status === 'fulfilled') setExpenses(expensesRes.value || []);
-      if (employeesRes.status === 'fulfilled') setUsers(employeesRes.value || []);
+      // Map snake_case to camelCase for Invoices
+      const mappedInvoices = (invoicesRes || []).map((inv: any) => ({
+        id: String(inv.id),
+        clientName: inv.client_name,
+        amount: Number(inv.amount),
+        status: inv.status,
+        dueDate: inv.due_date,
+        description: inv.description,
+        createdAt: inv.created_at,
+        currency: 'USD', // Default
+        issueDate: inv.created_at?.split('T')[0] || new Date().toISOString().split('T')[0],
+        items: []
+      }));
+      setInvoices(mappedInvoices);
+
+      // Map Expenses
+      const mappedExpenses = (expensesRes || []).map((exp: any) => ({
+        id: String(exp.id),
+        description: exp.description || exp.title,
+        amount: Number(exp.amount),
+        category: exp.category,
+        date: exp.date,
+        status: 'Approved', // Default
+        createdAt: exp.created_at
+      }));
+      setExpenses(mappedExpenses);
+
+      // Map Employees to Users
+      const mappedUsers = (employeesRes || []).map((emp: any) => ({
+        id: String(emp.id),
+        name: emp.name,
+        email: emp.email,
+        phone: emp.phone,
+        position: emp.position,
+        department: emp.department,
+        salary: Number(emp.salary),
+        joinDate: emp.join_date,
+        status: emp.status,
+        role: (emp.role || 'employee') as Role
+      }));
+      setUsers(mappedUsers);
+
+      // Map Testimonials
+      const mappedTestimonials = (testimonialsRes || []).map((t: any) => ({
+        id: String(t.id),
+        clientName: t.client_name,
+        clientPosition: t.client_position,
+        company: t.company,
+        message: t.message,
+        rating: t.rating,
+        avatarUrl: t.avatar_url,
+        isFeatured: !!t.is_featured,
+        createdAt: t.created_at
+      }));
+      setTestimonials(mappedTestimonials);
+
+      // Other data (if available)
+      // ...
+
     } catch (error) {
       console.error("Failed to fetch data", error);
     }
   };
-
-  // ─── AUTH ────────────────────────────────────────────
+  
+  // --- Auth ---
   const login = async (email?: string, password?: string) => {
     try {
       const res = await api.loginUser({ email, password });
-      if (res.success && res.data?.user) {
+      if (res.success && res.data?.token) {
+        localStorage.setItem('token', res.data.token);
+        localStorage.setItem('user', JSON.stringify(res.data.user));
         setUser(res.data.user);
-        localStorage.setItem('user', JSON.stringify(res.data.user)); // ✅ save user
         await fetchAllData();
         return { success: true };
       }
@@ -166,87 +224,85 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const logout = async () => {
     setIsLoading(true);
-    await api.logoutUser();
-    localStorage.removeItem('token'); // ✅ clear token
-    localStorage.removeItem('user');  // ✅ clear user
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
     setUser(null);
-    setProjects([]); setTasks([]); setContacts([]);
-    setInvoices([]); setExpenses([]); setUsers([]);
+    setProjects([]); setTasks([]); setContacts([]); setInvoices([]); setExpenses([]); setUsers([]); setTestimonials([]);
     setTimeout(() => setIsLoading(false), 500);
   };
 
   const register = async (data: Partial<User>, role: Role = 'employee') => {
     try {
       const res = await api.registerUser({ ...data, role });
-      if (res.success) return { success: true };
+      if (res.success) {
+        return { success: true };
+      }
       return { success: false, error: res.error || 'Registration failed' };
     } catch (error: any) {
       return { success: false, error: error.message || 'Registration failed' };
     }
   };
-
+  
   const addTeamMember = async (data: any) => {
-    try {
-      const res = await api.addTeamMember(data);
-      if (res.success) { await fetchAllData(); return { success: true }; }
-      return { success: false, error: res.error };
-    } catch (error: any) {
-      return { success: false, error: error.message };
-    }
+      try {
+          const res = await api.createEmployee(data);
+          await fetchAllData();
+          return { success: true };
+      } catch (error: any) {
+          return { success: false, error: error.message };
+      }
   };
 
   const updateTeamMember = async (id: string, data: Partial<User>) => {
-    try {
-      const res = await api.updateUser(id, data);
-      if (res.success) {
-        setUsers(prev => prev.map(u => u.id === id ? { ...u, ...data } : u));
-        return { success: true };
+      try {
+          await api.updateEmployee(id, data);
+          await fetchAllData();
+          return { success: true };
+      } catch (error: any) {
+          return { success: false, error: error.message };
       }
-      return { success: false, error: res.error };
-    } catch (error: any) {
-      return { success: false, error: error.message };
-    }
   };
 
   const deleteTeamMember = async (userId: string) => {
-    try {
-      const res = await api.deleteUser(userId);
-      if (res.success) {
-        setUsers(prev => prev.filter(u => u.id !== userId));
-        return { success: true };
+      try {
+          await api.deleteEmployee(userId);
+          setUsers(prev => prev.filter(u => u.id !== userId));
+          return { success: true };
+      } catch (error: any) {
+          return { success: false, error: error.message };
       }
-      return { success: false, error: res.error };
-    } catch (error: any) {
-      return { success: false, error: error.message };
-    }
   };
 
   const updateUserRole = async (userId: string, role: Role) => {
-    api.updateUserRole(userId, role).catch(e => console.error("API Error", e));
-    setUsers(prev => prev.map(u => u.id === userId ? { ...u, role } : u));
+      api.updateEmployee(userId, { role }).catch(e => console.error("API Error", e));
+      setUsers(prev => prev.map(u => u.id === userId ? { ...u, role } : u));
   };
-
+  
   const updateUserProfile = async (data: Partial<User>) => {
-    api.updateUserProfile(data).catch(e => console.error("API Error", e));
-    if (user) setUser({ ...user, ...data });
-    setUsers(prev => prev.map(u => u.id === user?.id ? { ...u, ...data } : u));
-  };
-
-  // ─── ATTENDANCE ──────────────────────────────────────
-  const markAttendance = async (record: AttendanceRecord) => {
-    api.markAttendance(record).catch(e => console.error("API Error", e));
-    setAttendance(prev => {
-      const exists = prev.findIndex(a => a.userId === record.userId && a.date === record.date);
-      if (exists !== -1) {
-        const updated = [...prev];
-        updated[exists] = { ...updated[exists], ...record };
-        return updated;
+      api.updateUserProfile(data).catch(e => console.error("API Error", e));
+      if(user) {
+        const updatedUser = {...user, ...data};
+        setUser(updatedUser);
+        localStorage.setItem('user', JSON.stringify(updatedUser));
       }
-      return [...prev, record];
-    });
+      setUsers(prev => prev.map(u => u.id === user?.id ? { ...u, ...data } : u));
+  }
+
+  // Attendance
+  const markAttendance = async (record: AttendanceRecord) => {
+      api.markAttendance(record.userId, record).catch(e => console.error("API Error", e));
+      setAttendance(prev => {
+          const exists = prev.findIndex(a => a.userId === record.userId && a.date === record.date);
+          if (exists !== -1) {
+              const updated = [...prev];
+              updated[exists] = { ...updated[exists], ...record };
+              return updated;
+          }
+          return [...prev, record];
+      });
   };
 
-  // ─── PROJECTS ────────────────────────────────────────
+  // --- Data Operations (CRUD) ---
   const addProject = async (p: Project) => {
     api.createProject(p).catch(e => console.error(e));
     setProjects(prev => [...prev, p]);
@@ -259,8 +315,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     api.deleteProject(id).catch(e => console.error(e));
     setProjects(prev => prev.filter(p => p.id !== id));
   };
-
-  // ─── TASKS ───────────────────────────────────────────
   const addTask = async (t: Task) => {
     api.createTask(t).catch(e => console.error(e));
     setTasks(prev => [...prev, t]);
@@ -273,6 +327,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     api.updateTask(id, { status }).catch(e => console.error(e));
     setTasks(prev => prev.map(t => t.id === id ? { ...t, status } : t));
   };
+  
   const toggleTaskChecklist = async (taskId: string, itemId: string) => {
     const task = tasks.find(t => t.id === taskId);
     if (!task || !task.checklist) return;
@@ -280,6 +335,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     api.updateTask(taskId, { checklist: newChecklist }).catch(e => console.error(e));
     setTasks(prev => prev.map(t => t.id === taskId ? { ...t, checklist: newChecklist } : t));
   };
+  
   const addTaskComment = async (id: string, content: string) => {
     const task = tasks.find(t => t.id === id);
     if (!task || !user) return;
@@ -288,94 +344,87 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     api.updateTask(id, { comments: newComments }).catch(e => console.error(e));
     setTasks(prev => prev.map(t => t.id === id ? { ...t, comments: newComments } : t));
   };
+
   const sendToEditor = async (taskId: string, editorId: string, sourceLink: string, instructions: string) => {
     const editor = users.find(u => u.id === editorId);
     const updates = { assignee: editor?.name || 'Unassigned', sourceLink, instructions, status: 'todo' as const };
     api.updateTask(taskId, updates).catch(e => console.error(e));
     setTasks(prev => prev.map(t => t.id === taskId ? { ...t, ...updates } : t));
   };
+
   const submitTaskForReview = async (taskId: string, deliverableLink: string) => {
     const updates = { status: 'review' as const, deliverableLink };
     api.updateTask(taskId, updates).catch(e => console.error(e));
     setTasks(prev => prev.map(t => t.id === taskId ? { ...t, ...updates } : t));
   };
+  
   const approveTask = async (taskId: string) => updateTaskStatus(taskId, 'done');
+  
   const requestTaskRevision = async (taskId: string, comment: string) => {
-    addTaskComment(taskId, `REVISION REQUESTED: ${comment}`);
-    updateTaskStatus(taskId, 'revisions');
+     addTaskComment(taskId, `REVISION REQUESTED: ${comment}`);
+     updateTaskStatus(taskId, 'revisions');
   };
 
-  // ─── FINANCE ─────────────────────────────────────────
-  const addInvoice = async (i: Invoice) => {
-    try {
-      await api.createInvoice(i);
-      setInvoices(prev => [...prev, i]);
-    } catch (e) { console.error(e); }
-  };
-  const updateInvoice = async (i: Invoice) => {
-    try {
-      await api.updateInvoice(i.id, i);
+  const addContact = async (c: Contact) => { 
+      api.createContact(c).catch(e => console.error(e));
+      setContacts(prev => [...prev, c]); 
+  }
+  const addInvoice = async (i: Invoice) => { 
+      api.createInvoice(i).catch(e => console.error(e));
+      setInvoices(prev => [...prev, i]); 
+  }
+  const updateInvoice = async (i: Invoice) => { 
+      api.updateInvoice(i.id, i).catch(e => console.error(e));
       setInvoices(prev => prev.map(inv => inv.id === i.id ? i : inv));
-    } catch (e) { console.error(e); }
-  };
+  }
   const sendInvoice = (id: string) => {
-    const inv = invoices.find(i => i.id === id);
-    if (inv) updateInvoice({ ...inv, status: InvoiceStatus.SENT });
-  };
-  const addExpense = async (e: Expense) => {
-    try {
-      await api.createExpense(e);
+      const inv = invoices.find(i=>i.id===id);
+      if(inv) updateInvoice({ ...inv, status: InvoiceStatus.SENT });
+  }
+  const deleteInvoice = async (id: string) => {
+      api.deleteInvoice(id).catch(e => console.error(e));
+      setInvoices(prev => prev.filter(i => i.id !== id));
+  }
+  const addExpense = async (e: Expense) => { 
+      api.createExpense(e).catch(e => console.error(e));
       setExpenses(prev => [...prev, e]);
-    } catch (err) { console.error(err); }
-  };
-  const updateExpense = async (e: Expense) => {
-    try {
-      await api.updateExpense(e.id, e);
+  }
+  const updateExpense = async (e: Expense) => { 
+      api.updateExpense(e.id, e).catch(e => console.error(e));
       setExpenses(prev => prev.map(exp => exp.id === e.id ? e : exp));
-    } catch (err) { console.error(err); }
-  };
-  const deleteExpense = async (id: string) => {
-    try {
-      await api.deleteExpense(id);
+  }
+  const deleteExpense = async (id: string) => { 
+      api.deleteExpense(id).catch(e => console.error(e));
       setExpenses(prev => prev.filter(e => e.id !== id));
-    } catch (e) { console.error(e); }
-  };
-  const toggleExpenseStatus = async (id: string) => {
+  }
+  const toggleExpenseStatus = async (id: string) => { 
     const expense = expenses.find(e => e.id === id);
-    if (expense) updateExpense({ ...expense, status: expense.status === 'Approved' ? 'Pending' : 'Approved' });
-  };
-
-  // ─── CRM ─────────────────────────────────────────────
-  const addContact = async (c: Contact) => {
-    api.createContact(c).catch(e => console.error(e));
-    setContacts(prev => [...prev, c]);
-  };
-  const addOpportunity = async (o: Opportunity) => {
-    api.createOpportunity(o).catch(e => console.error(e));
-    setOpportunities(prev => [...prev, o]);
-  };
+    if(expense) updateExpense({...expense, status: expense.status === 'Approved' ? 'Pending' : 'Approved'});
+  }
+  const addOpportunity = async (o: Opportunity) => { 
+      api.createOpportunity(o).catch(e => console.error(e));
+      setOpportunities(prev => [...prev, o]);
+  }
   const updateOpportunityStage = async (id: string, stage: Opportunity['stage']) => {
     api.updateOpportunity(id, { stage }).catch(e => console.error(e));
     setOpportunities(prev => prev.map(o => o.id === id ? { ...o, stage } : o));
   };
-
-  // ─── KNOWLEDGE / POSTS ───────────────────────────────
-  const addArticle = async (a: KnowledgeArticle) => {
-    api.createArticle(a).catch(e => console.error(e));
-    setArticles(prev => [...prev, a]);
-  };
-  const addPost = async (p: TeamPost) => {
-    api.createPost(p).catch(e => console.error(e));
-    setPosts(prev => [p, ...prev]);
-  };
-  const deletePost = async (id: string) => {
-    api.deletePost(id).catch(e => console.error(e));
-    setPosts(prev => prev.filter(p => p.id !== id));
-  };
+  const addArticle = async (a: KnowledgeArticle) => { 
+      api.createArticle(a).catch(e => console.error(e));
+      setArticles(prev => [...prev, a]);
+  }
+  const addPost = async (p: TeamPost) => { 
+      api.createPost(p).catch(e => console.error(e));
+      setPosts(prev => [p, ...prev]);
+  }
+  const deletePost = async (id: string) => { 
+      api.deletePost(id).catch(e => console.error(e));
+      setPosts(prev => prev.filter(p => p.id !== id));
+  }
   const toggleLikePost = async (postId: string) => {
     if (!user) return;
     const post = posts.find(p => p.id === postId);
-    if (!post) return;
+    if(!post) return;
     const likedBy = post.likedBy.includes(user.id) ? post.likedBy.filter(id => id !== user.id) : [...post.likedBy, user.id];
     api.updatePost(postId, { likedBy }).catch(e => console.error(e));
     setPosts(prev => prev.map(p => p.id === postId ? { ...p, likedBy } : p));
@@ -389,37 +438,43 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     api.updatePost(postId, { comments }).catch(e => console.error(e));
     setPosts(prev => prev.map(p => p.id === postId ? { ...p, comments } : p));
   };
-
-  // ─── WEB FORMS ───────────────────────────────────────
-  const addWebForm = async (f: WebForm) => {
-    api.createWebForm(f).catch(e => console.error(e));
-    setWebForms(prev => [...prev, f]);
-  };
-  const deleteWebForm = async (id: string) => {
-    api.deleteWebForm(id).catch(e => console.error(e));
-    setWebForms(prev => prev.filter(f => f.id !== id));
-  };
-
-  // ─── SETTINGS ────────────────────────────────────────
-  const updateCompanySettings = async (s: CompanySettings) => {
-    api.updateCompanySettings(s).catch(e => console.error(e));
-    setCompanySettings(s);
-  };
+  const addWebForm = async (f: WebForm) => { 
+      api.createWebForm(f).catch(e => console.error(e));
+      setWebForms(prev => [...prev, f]);
+  }
+  const deleteWebForm = async (id: string) => { 
+      api.deleteWebForm(id).catch(e => console.error(e));
+      setWebForms(prev => prev.filter(f => f.id !== id));
+  }
+  const updateCompanySettings = async (s: CompanySettings) => { 
+      api.updateCompanySettings(s).catch(e => console.error(e));
+      setCompanySettings(s); 
+  }
   const savePartnerDivisionData = async (data: PartnerDivisionData) => {
-    api.savePartnerDivision(data).catch(e => console.error(e));
-    setPartnerDivision(data);
+      api.savePartnerDivision(data).catch(e => console.error(e));
+      setPartnerDivision(data);
+  }
+
+  // Testimonial operations
+  const addTestimonial = async (t: any) => {
+    api.createTestimonial(t).catch(e => console.error(e));
+    setTestimonials(prev => [...prev, t]);
+  };
+  const updateTestimonial = async (id: string, t: any) => {
+    api.updateTestimonial(id, t).catch(e => console.error(e));
+    setTestimonials(prev => prev.map(item => item.id === id ? t : item));
+  };
+  const deleteTestimonial = async (id: string) => {
+    api.deleteTestimonial(id).catch(e => console.error(e));
+    setTestimonials(prev => prev.filter(item => item.id !== id));
   };
 
-  // ─── MISC ─────────────────────────────────────────────
   const createPhotographyWorkflow = (project: Project, secondaryAssigneeId: string) => { addProject(project); };
-  const incrementFormSubmission = (id: string) => {};
+  const incrementFormSubmission = (id: string) => { };
   const toggleTheme = () => setTheme(prev => prev === 'light' ? 'dark' : 'light');
-  const formatAmount = (amt: number, curr?: string) => {
-    const t = curr || globalCurrency;
-    return new Intl.NumberFormat('en-US', { style: 'currency', currency: t, maximumFractionDigits: 0 }).format(amt * (EXCHANGE_RATES[t] || 1));
-  };
+  const formatAmount = (amt: number, curr?: string) => { const t = curr || globalCurrency; return new Intl.NumberFormat('en-US', { style: 'currency', currency: t, maximumFractionDigits: 0 }).format(amt * (EXCHANGE_RATES[t] || 1)); };
   const markNotificationRead = (id: string) => setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
-  const resendVerification = async (email: string) => false;
+  const resendVerification = async(email: string) => { return false; };
 
   if (isLoading) {
     return (
@@ -431,22 +486,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       </div>
     );
   }
-
+  
   return (
     <AppContext.Provider value={{
-      user, users, projects, tasks, contacts, invoices, opportunities, expenses, articles, posts, webForms,
-      companySettings, attendance, partnerDivision, isAuthenticated: !!user, isLoading, notifications,
+      user, users, projects, tasks, contacts, invoices, opportunities, expenses, articles, posts, webForms, testimonials, companySettings, attendance, partnerDivision, isAuthenticated: !!user, isLoading, notifications,
       theme, toggleTheme, globalCurrency, setGlobalCurrency, formatAmount,
-      login, logout, register, addTeamMember, updateTeamMember, deleteTeamMember, updateUserProfile,
-      updateUserRole, markAttendance, resendVerification,
-      addProject, createPhotographyWorkflow, deleteProject, updateProject,
-      addTask, updateTask, updateTaskStatus, toggleTaskChecklist, addTaskComment,
+      login, logout, register, addTeamMember, updateTeamMember, deleteTeamMember, updateUserProfile, updateUserRole, markAttendance, resendVerification,
+      addProject, createPhotographyWorkflow, deleteProject, updateProject, addTask, updateTask, updateTaskStatus, toggleTaskChecklist, addTaskComment,
       sendToEditor, submitTaskForReview, approveTask, requestTaskRevision,
-      addContact, addInvoice, updateInvoice, sendInvoice, addOpportunity, updateOpportunityStage,
-      addExpense, updateExpense, deleteExpense, toggleExpenseStatus,
-      addArticle, addPost, deletePost, toggleLikePost, addComment,
-      addWebForm, deleteWebForm, incrementFormSubmission,
-      updateCompanySettings, savePartnerDivisionData, markNotificationRead
+      addContact, addInvoice, updateInvoice, sendInvoice, deleteInvoice, addOpportunity, updateOpportunityStage, addExpense, updateExpense, deleteExpense, toggleExpenseStatus,
+      addArticle, addPost, deletePost, toggleLikePost, addComment, addWebForm, deleteWebForm, incrementFormSubmission, updateCompanySettings, savePartnerDivisionData, markNotificationRead,
+      addTestimonial, updateTestimonial, deleteTestimonial
     }}>
       {children}
     </AppContext.Provider>
