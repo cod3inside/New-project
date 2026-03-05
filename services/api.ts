@@ -1,28 +1,19 @@
 import axios from 'axios';
 import { User, Project, Task, Contact, Invoice, Opportunity, Expense, KnowledgeArticle, TeamPost, WebForm, CompanySettings, Role, AttendanceRecord, PartnerDivisionData } from '../types';
 
-// Configure Axios instance
 const API_URL = import.meta.env.VITE_API_URL || 'https://api.clippingfriend.com';
 
 const api = axios.create({
   baseURL: API_URL,
-  headers: {
-    'Content-Type': 'application/json',
-  },
+  headers: { 'Content-Type': 'application/json' },
 });
 
-// Add a request interceptor to include the JWT token
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('token');
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
-  }
+  if (token) config.headers.Authorization = `Bearer ${token}`;
   return config;
-}, (error) => {
-  return Promise.reject(error);
-});
+}, (error) => Promise.reject(error));
 
-// Helper to extract data
 const responseBody = (response: any) => response.data;
 
 // --- Authentication ---
@@ -34,7 +25,6 @@ export const loginUser = async (creds: any) => {
     return { success: false, error: error.response?.data?.message || 'Login failed' };
   }
 };
-
 export const registerUser = async (data: any) => {
   try {
     const res = await api.post('/api/auth/register', data);
@@ -43,10 +33,7 @@ export const registerUser = async (data: any) => {
     return { success: false, error: error.response?.data?.message || 'Registration failed' };
   }
 };
-
-export const logoutUser = async () => {
-  return { success: true };
-};
+export const logoutUser = async () => ({ success: true });
 
 // --- Invoices ---
 export const getInvoices = async () => api.get('/api/finance/invoices').then(responseBody);
@@ -82,11 +69,8 @@ export const updateInvoice = async (id: string, data: any) => {
   return api.put(`/api/finance/invoices/${id}`, payload).then(responseBody);
 };
 export const deleteInvoice = async (id: string) => api.delete(`/api/finance/invoices/${id}`).then(responseBody);
-
-// Upload invoice PDF (base64) to server
-export const uploadInvoicePdf = async (invoiceId: string, pdfBase64: string) => {
-  return api.post(`/api/finance/invoices/${invoiceId}/pdf`, { pdf: pdfBase64 }).then(responseBody);
-};
+export const uploadInvoicePdf = async (invoiceId: string, pdfBase64: string) =>
+  api.post(`/api/finance/invoices/${invoiceId}/pdf`, { pdf: pdfBase64 }).then(responseBody);
 
 // --- Expenses ---
 export const getExpenses = async () => api.get('/api/finance/expenses').then(responseBody);
@@ -94,8 +78,8 @@ export const createExpense = async (data: any) => {
   const payload = {
     description: data.description,
     amount: data.amount,
-    category: data.category,
-    date: data.date,
+    category: data.category || 'General',
+    date: data.date || new Date().toISOString().split('T')[0],
     status: data.status || 'Pending',
   };
   return api.post('/api/finance/expenses', payload).then(responseBody);
@@ -104,7 +88,7 @@ export const updateExpense = async (id: string, data: any) => {
   const payload = {
     description: data.description,
     amount: data.amount,
-    category: data.category,
+    category: data.category || 'General',
     date: data.date,
     status: data.status,
   };
@@ -112,12 +96,10 @@ export const updateExpense = async (id: string, data: any) => {
 };
 export const deleteExpense = async (id: string) => api.delete(`/api/finance/expenses/${id}`).then(responseBody);
 
-// --- Partner Division (FIX: these were completely missing) ---
-export const getPartnerDivision = async (): Promise<PartnerDivisionData | null> => {
-  return api.get('/api/finance/partner-division').then(responseBody);
-};
+// --- Partner Division ---
+export const getPartnerDivision = async (): Promise<PartnerDivisionData | null> =>
+  api.get('/api/finance/partner-division').then(responseBody);
 export const savePartnerDivision = async (data: PartnerDivisionData) => {
-  // Backend expects camelCase: shabujList, mashudList, lastUpdated
   const payload = {
     income: data.income,
     shabujList: data.shabujList,
@@ -126,6 +108,34 @@ export const savePartnerDivision = async (data: PartnerDivisionData) => {
   };
   return api.post('/api/finance/partner-division', payload).then(responseBody);
 };
+
+// --- Contacts ---
+// FIX: getContacts added — contacts were never fetched so client names were always blank
+export const getContacts = async () => api.get('/api/contacts').then(responseBody);
+export const createContact = async (data: any) => {
+  // FIX: backend expects snake_case last_contacted
+  const payload = {
+    name: data.name,
+    company: data.company,
+    email: data.email,
+    phone: data.phone,
+    tags: data.tags || [],
+    last_contacted: data.lastContacted || data.last_contacted || new Date().toISOString(),
+  };
+  return api.post('/api/contacts', payload).then(responseBody);
+};
+export const updateContact = async (id: string, data: any) => {
+  const payload = {
+    name: data.name,
+    company: data.company,
+    email: data.email,
+    phone: data.phone,
+    tags: data.tags || [],
+    last_contacted: data.lastContacted || data.last_contacted || new Date().toISOString(),
+  };
+  return api.put(`/api/contacts/${id}`, payload).then(responseBody);
+};
+export const deleteContact = async (id: string) => api.delete(`/api/contacts/${id}`).then(responseBody);
 
 // --- Employees ---
 export const getEmployees = async () => api.get('/api/employees').then(responseBody);
@@ -139,7 +149,7 @@ export const createEmployee = async (data: any) => {
     department: data.department,
     salary: data.salary,
     join_date: data.joinDate || data.join_date,
-    status: data.status,
+    status: data.status || 'active',
     role: data.role || 'employee',
     password: data.password,
   };
@@ -202,9 +212,6 @@ export const createTask = async (data: Task) => api.post('/api/tasks', data).the
 export const updateTask = async (id: string, data: Partial<Task>) => api.put(`/api/tasks/${id}`, data).then(responseBody);
 export const deleteTask = async (id: string) => api.delete(`/api/tasks/${id}`).then(responseBody);
 
-// --- Contacts ---
-export const createContact = async (data: Contact) => api.post('/api/contacts', data).then(responseBody);
-
 // --- Opportunities ---
 export const createOpportunity = async (data: Opportunity) => api.post('/api/opportunities', data).then(responseBody);
 export const updateOpportunity = async (id: string, data: Partial<Opportunity>) => api.put(`/api/opportunities/${id}`, data).then(responseBody);
@@ -230,11 +237,11 @@ export default {
   getInvoices, getInvoiceById, createInvoice, updateInvoice, deleteInvoice, uploadInvoicePdf,
   getExpenses, createExpense, updateExpense, deleteExpense,
   getPartnerDivision, savePartnerDivision,
+  getContacts, createContact, updateContact, deleteContact,
   getEmployees, getEmployeeById, createEmployee, updateEmployee, deleteEmployee, getEmployeeAttendance, markAttendance,
   getTestimonials, getFeaturedTestimonials, getTestimonialById, createTestimonial, updateTestimonial, deleteTestimonial,
   createProject, updateProject, deleteProject,
   createTask, updateTask, deleteTask,
-  createContact,
   createOpportunity, updateOpportunity,
   createArticle,
   createPost, updatePost, deletePost,
