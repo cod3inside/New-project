@@ -97,7 +97,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [webForms, setWebForms] = useState<WebForm[]>([]);
   const [testimonials, setTestimonials] = useState<any[]>([]);
   const [attendance, setAttendance] = useState<AttendanceRecord[]>([]);
-  // FIX 1: partnerDivision now gets loaded from API (was always null before)
   const [partnerDivision, setPartnerDivision] = useState<PartnerDivisionData | null>(null);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [companySettings, setCompanySettings] = useState<CompanySettings>({
@@ -107,7 +106,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     phone: '+8801719845438',
     website: 'www.clippingfriend.com'
   });
-
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
   const [globalCurrency, setGlobalCurrency] = useState('USD');
   const [isLoading, setIsLoading] = useState(true);
@@ -117,7 +115,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       try {
         const token = localStorage.getItem('token');
         const storedUser = localStorage.getItem('user');
-
         if (token && storedUser) {
           setUser(JSON.parse(storedUser));
           await fetchAllData();
@@ -133,39 +130,42 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const fetchAllData = async () => {
     try {
-      // FIX 1: Added api.getPartnerDivision() to the fetch list
-      const [invoicesRes, expensesRes, employeesRes, testimonialsRes, partnerDivisionRes] = await Promise.all([
+      // FIX: Added getContacts and getPartnerDivision — both were missing so data never loaded
+      const [invoicesRes, expensesRes, employeesRes, testimonialsRes, contactsRes, partnerDivisionRes] = await Promise.all([
         api.getInvoices().catch(() => []),
         api.getExpenses().catch(() => []),
         api.getEmployees().catch(() => []),
         api.getTestimonials().catch(() => []),
-        api.getPartnerDivision().catch(() => null)   // ← NEW: load saved partner data
+        api.getContacts().catch(() => []),         // FIX: now loads contacts
+        api.getPartnerDivision().catch(() => null), // FIX: now loads partner division
       ]);
 
       // Map Invoices
       const mappedInvoices = (invoicesRes || []).map((inv: any) => ({
         id: String(inv.id),
+        clientId: String(inv.client_id || ''),
         clientName: inv.client_name,
         amount: Number(inv.amount),
         status: inv.status,
         dueDate: inv.due_date,
         description: inv.description,
         createdAt: inv.created_at,
-        currency: 'USD',
-        issueDate: inv.created_at?.split('T')[0] || new Date().toISOString().split('T')[0],
-        items: []
+        currency: inv.currency || 'USD',
+        issueDate: inv.issue_date || inv.created_at?.split('T')[0] || new Date().toISOString().split('T')[0],
+        paymentInfo: inv.payment_info || '',
+        items: inv.items ? (typeof inv.items === 'string' ? JSON.parse(inv.items) : inv.items) : [],
       }));
       setInvoices(mappedInvoices);
 
       // Map Expenses
       const mappedExpenses = (expensesRes || []).map((exp: any) => ({
         id: String(exp.id),
-        description: exp.description || exp.title,
+        description: exp.description || exp.title || '',
         amount: Number(exp.amount),
-        category: exp.category,
+        category: exp.category || 'General',
         date: exp.date,
         status: exp.status || 'Pending',
-        createdAt: exp.created_at
+        createdAt: exp.created_at,
       }));
       setExpenses(mappedExpenses);
 
@@ -180,7 +180,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         salary: Number(emp.salary),
         joinDate: emp.join_date,
         status: emp.status,
-        role: (emp.role || 'employee') as Role
+        role: (emp.role || 'employee') as Role,
       }));
       setUsers(mappedUsers);
 
@@ -194,11 +194,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         rating: t.rating,
         avatarUrl: t.avatar_url,
         isFeatured: !!t.is_featured,
-        createdAt: t.created_at
+        createdAt: t.created_at,
       }));
       setTestimonials(mappedTestimonials);
 
-      // FIX 1: Set partnerDivision from API response
+      // FIX: Map Contacts — backend returns snake_case, frontend needs camelCase
+      const mappedContacts = (contactsRes || []).map((c: any) => ({
+        id: String(c.id),
+        name: c.name,
+        company: c.company || '',
+        email: c.email || '',
+        phone: c.phone || '',
+        tags: c.tags ? (typeof c.tags === 'string' ? JSON.parse(c.tags) : c.tags) : [],
+        lastContacted: c.last_contacted || c.created_at,
+      }));
+      setContacts(mappedContacts);
+
+      // FIX: Set partner division from API
       if (partnerDivisionRes) {
         setPartnerDivision(partnerDivisionRes);
       }
@@ -304,7 +316,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
   };
 
-  // --- Data Operations (CRUD) ---
+  // --- CRUD ---
   const addProject = async (p: Project) => {
     api.createProject(p).catch(err => console.error(err));
     setProjects(prev => [...prev, p]);
@@ -329,7 +341,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     api.updateTask(id, { status }).catch(err => console.error(err));
     setTasks(prev => prev.map(t => t.id === id ? { ...t, status } : t));
   };
-
   const toggleTaskChecklist = async (taskId: string, itemId: string) => {
     const task = tasks.find(t => t.id === taskId);
     if (!task || !task.checklist) return;
@@ -337,7 +348,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     api.updateTask(taskId, { checklist: newChecklist }).catch(err => console.error(err));
     setTasks(prev => prev.map(t => t.id === taskId ? { ...t, checklist: newChecklist } : t));
   };
-
   const addTaskComment = async (id: string, content: string) => {
     const task = tasks.find(t => t.id === id);
     if (!task || !user) return;
@@ -346,31 +356,49 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     api.updateTask(id, { comments: newComments }).catch(err => console.error(err));
     setTasks(prev => prev.map(t => t.id === id ? { ...t, comments: newComments } : t));
   };
-
   const sendToEditor = async (taskId: string, editorId: string, sourceLink: string, instructions: string) => {
     const editor = users.find(u => u.id === editorId);
     const updates = { assignee: editor?.name || 'Unassigned', sourceLink, instructions, status: 'todo' as const };
     api.updateTask(taskId, updates).catch(err => console.error(err));
     setTasks(prev => prev.map(t => t.id === taskId ? { ...t, ...updates } : t));
   };
-
   const submitTaskForReview = async (taskId: string, deliverableLink: string) => {
     const updates = { status: 'review' as const, deliverableLink };
     api.updateTask(taskId, updates).catch(err => console.error(err));
     setTasks(prev => prev.map(t => t.id === taskId ? { ...t, ...updates } : t));
   };
-
   const approveTask = async (taskId: string) => updateTaskStatus(taskId, 'done');
-
   const requestTaskRevision = async (taskId: string, comment: string) => {
     addTaskComment(taskId, `REVISION REQUESTED: ${comment}`);
     updateTaskStatus(taskId, 'revisions');
   };
 
+  // FIX: addContact now also refreshes contacts from server after saving
   const addContact = async (c: Contact) => {
-    api.createContact(c).catch(err => console.error(err));
-    setContacts(prev => [...prev, c]);
+    try {
+      await api.createContact(c);
+      // Refresh contacts so new contact appears with server-assigned ID
+      const fresh = await api.getContacts().catch(() => null);
+      if (fresh) {
+        const mapped = fresh.map((item: any) => ({
+          id: String(item.id),
+          name: item.name,
+          company: item.company || '',
+          email: item.email || '',
+          phone: item.phone || '',
+          tags: item.tags ? (typeof item.tags === 'string' ? JSON.parse(item.tags) : item.tags) : [],
+          lastContacted: item.last_contacted || item.created_at,
+        }));
+        setContacts(mapped);
+      } else {
+        setContacts(prev => [...prev, c]);
+      }
+    } catch (err) {
+      console.error('Failed to create contact:', err);
+      setContacts(prev => [...prev, c]);
+    }
   };
+
   const addInvoice = async (invoice: Invoice) => {
     api.createInvoice(invoice).catch(err => console.error(err));
     setInvoices(prev => [...prev, invoice]);
@@ -388,7 +416,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setInvoices(prev => prev.filter(i => i.id !== id));
   };
 
-  // FIX 2: Renamed param from 'e' to 'expense' to avoid variable shadowing in .catch()
+  // FIX: renamed 'e' param to 'expense' to fix variable shadowing bug
   const addExpense = async (expense: Expense) => {
     api.createExpense(expense).catch(err => console.error(err));
     setExpenses(prev => [...prev, expense]);
@@ -458,19 +486,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setCompanySettings(s);
   };
 
-  // FIX 3: savePartnerDivisionData now properly awaits the API call
-  // so failures are caught and not silently swallowed
+  // FIX: now properly awaits the API call so failures surface correctly
   const savePartnerDivisionData = async (data: PartnerDivisionData) => {
     try {
       await api.savePartnerDivision(data);
       setPartnerDivision(data);
     } catch (err) {
       console.error("Failed to save partner division data:", err);
-      throw err; // re-throw so Finance.tsx can show an error if needed
+      throw err;
     }
   };
 
-  // Testimonial operations
   const addTestimonial = async (t: any) => {
     api.createTestimonial(t).catch(err => console.error(err));
     setTestimonials(prev => [...prev, t]);
@@ -492,7 +518,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return new Intl.NumberFormat('en-US', { style: 'currency', currency: t, maximumFractionDigits: 0 }).format(amt * (EXCHANGE_RATES[t] || 1));
   };
   const markNotificationRead = (id: string) => setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
-  const resendVerification = async (email: string) => { return false; };
+  const resendVerification = async (email: string) => false;
 
   if (isLoading) {
     return (
